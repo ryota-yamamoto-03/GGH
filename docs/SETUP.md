@@ -89,6 +89,7 @@ update public.users set role = 'ADMIN' where email = 'あなたのメールア�
 
 | 症状 | 対処 |
 |---|---|
+| **500 (INTERNAL_SERVER_ERROR)** | まず **`/api/health`** にアクセスして診断結果を確認。①環境変数未設定(Vercel は設定後に**再デプロイが必要**)②`npm run db:push` 未実行(テーブル未作成)③`DATABASE_URL` の形式ミス、のいずれかがほとんどです |
 | ログイン後にループする | Supabase の Redirect URLs に `/auth/callback` を追加したか確認 |
 | `P1001`(DB接続不可) | `DATABASE_URL` のパスワード・ホストを確認。IPv4環境では pooler 接続を使用 |
 | ポイントが加算されない | スタッフ/管理者ロールでログインしているか確認(利用者は自己付与不可) |

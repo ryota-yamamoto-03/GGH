@@ -12,6 +12,18 @@ import { createClient } from "@/lib/supabase/server";
  * React cache() で同一リクエスト内の重複クエリを防ぐ。
  */
 export const getCurrentUser = cache(async (): Promise<User | null> => {
+  // Supabase の環境変数が未設定の場合はログイン不可として扱う
+  // (500 にせず /login へ誘導する。診断は /api/health で可能)
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    console.error(
+      "[auth] Supabase の環境変数が未設定です。/api/health で状態を確認してください。"
+    );
+    return null;
+  }
+
   const supabase = createClient();
   const {
     data: { user: authUser },

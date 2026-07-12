@@ -18,19 +18,39 @@ import {
  */
 function LoginContent() {
   const [loading, setLoading] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/dashboard";
   const error = searchParams.get("error");
 
   const signInWithGoogle = async () => {
+    // 環境変数が未設定のままクリックされた場合に白画面/例外を防ぐ
+    if (
+      !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    ) {
+      setConfigError(
+        "Supabase の設定が完了していません。管理者は /api/health で状態を確認してください。"
+      );
+      return;
+    }
     setLoading(true);
-    const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-      },
-    });
+    try {
+      const supabase = createClient();
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        },
+      });
+      if (oauthError) {
+        setConfigError(`ログインを開始できませんでした: ${oauthError.message}`);
+        setLoading(false);
+      }
+    } catch (e) {
+      setConfigError("ログインを開始できませんでした。時間をおいてお試しください。");
+      setLoading(false);
+    }
   };
 
   return (
@@ -56,6 +76,11 @@ function LoginContent() {
           {error === "auth" && (
             <p className="rounded-xl bg-destructive/10 p-3 text-center text-sm text-destructive">
               ログインに失敗しました。もう一度お試しください。
+            </p>
+          )}
+          {configError && (
+            <p className="rounded-xl bg-destructive/10 p-3 text-center text-sm text-destructive">
+              {configError}
             </p>
           )}
           <Button
