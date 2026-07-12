@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * GGH カラートークン
+ * ライト: 白ベース × 水色 × 青(清潔感・近未来)
+ * ダーク: Discord ライクな深いネイビー × シアングロー
+ */
+@layer base {
+  :root {
+    --background: 204 100% 99%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 199 95% 94%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 199 95% 90%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 32% 90%;
+    --input: 210 32% 90%;
+    --ring: 199 89% 48%;
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 98%;
+    --card: 222 44% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 44% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 199 89% 55%;
+    --primary-foreground: 222 47% 8%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 15%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 20%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 199 89% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "palt";
+  }
+}
+
+@layer utilities {
+  /* ゲームUI: ガラス風パネル */
+  .glass-panel {
+    @apply rounded-2xl border border-white/40 bg-white/70 shadow-lg shadow-sky-100/60 backdrop-blur-md dark:border-white/10 dark:bg-white/5 dark:shadow-black/30;
+  }
+
+  /* ゲームUI: シアンのネオン枠 */
+  .neon-border {
+    @apply border border-cyan-300/60 shadow-[0_0_16px_rgba(34,211,238,0.25)] dark:border-cyan-400/40 dark:shadow-[0_0_20px_rgba(34,211,238,0.2)];
+  }
+
+  /* テキストのグラデーション */
+  .text-game-gradient {
+    @apply bg-gradient-to-r from-cyan-500 to-blue-600 bg-clip-text text-transparent dark:from-cyan-300 dark:to-blue-400;
+  }
+
+  /* スクロールバーを控えめに */
+  .thin-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .thin-scrollbar::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-sky-200 dark:bg-slate-700;
+  }
+}

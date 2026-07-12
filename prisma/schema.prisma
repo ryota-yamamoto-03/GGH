@@ -1,0 +1,367 @@
+// ============================================================
+// GGH ライフポイント管理アプリ DBスキーマ
+// - Supabase (PostgreSQL) を想定
+// - id は Supabase Auth の auth.users.id (UUID) と同期させる
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // Transaction pooler (pgbouncer)
+  directUrl = env("DIRECT_URL")     // migrate 用ダイレクト接続
+}
+
+// ------------------------------------------------------------
+// ロール: 利用者 / スタッフ / 管理者
+// ------------------------------------------------------------
+enum Role {
+  USER
+  STAFF
+  ADMIN
+}
+
+// ------------------------------------------------------------
+// ミッション種別: デイリー / ウィークリー
+// ------------------------------------------------------------
+enum MissionType {
+  DAILY
+  WEEKLY
+}
+
+// ------------------------------------------------------------
+// 交換申請ステータス
+// ------------------------------------------------------------
+enum ExchangeStatus {
+  PENDING   // 申請中
+  APPROVED  // 承認済み(手配中)
+  DELIVERED // 引き渡し完了
+  CANCELED  // キャンセル(ポイント返却)
+}
+
+// ------------------------------------------------------------
+// 通知種別
+// ------------------------------------------------------------
+enum NotificationType {
+  MISSION      // 今日のミッション
+  POINT        // ポイント獲得
+  LEVEL_UP     // レベルアップ
+  EXCHANGE     // 景品交換完了
+  EVENT        // イベント開始
+  ACHIEVEMENT  // 実績解除
+  ANNOUNCEMENT // お知らせ
+}
+
+// ------------------------------------------------------------
+// ユーザー(利用者・スタッフ・管理者共通)
+// ------------------------------------------------------------
+model User {
+  id            String   @id @db.Uuid // Supabase Auth の UID
+  email         String   @unique
+  name          String
+  avatarUrl     String?  @map("avatar_url")
+  role          Role     @default(USER)
+  /// 現在の所持LP(景品交換で減る)
+  currentLp     Int      @default(0) @map("current_lp")
+  /// 累計獲得LP(レベル計算に使用。交換しても減らない)
+  totalEarnedLp Int      @default(0) @map("total_earned_lp")
+  /// ランキングに自分を表示するか(本人が選択可能)
+  showInRanking Boolean  @default(true) @map("show_in_ranking")
+  /// 退所などで無効化されたアカウント
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  pointLogs        PointLog[]        @relation("UserPointLogs")
+  grantedLogs      PointLog[]        @relation("GrantedByStaff")
+  userAchievements UserAchievement[]
+  userMissions     UserMission[]
+  exchanges        RewardExchange[]
+  notifications    Notification[]
+  supportRecords   SupportRecord[]   @relation("RecordTarget")
+  writtenRecords   SupportRecord[]   @relation("RecordAuthor")
+  staffComments    StaffComment[]    @relation("CommentTarget")
+  writtenComments  StaffComment[]    @relation("CommentAuthor")
+
+  @@map("users")
+}
+
+// ------------------------------------------------------------
+// ポイント行動マスタ(管理者が自由に変更可能)
+// 例: 起床 5PT / 服薬 10PT / B型作業所 40PT ...
+// ------------------------------------------------------------
+model PointAction {
+  id        String   @id @default(cuid())
+  name      String
+  points    Int
+  /// lucide-react のアイコン名(UI表示用)
+  icon      String   @default("star")
+  /// 生活 / 健康 / 活動 / 学習 などの分類
+  category  String   @default("生活")
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  pointLogs PointLog[]
+  missions  MissionTemplate[]
+
+  @@map("point_actions")
+}
+
+// ------------------------------------------------------------
+// ポイント履歴(付与・交換のすべての増減を記録)
+// ------------------------------------------------------------
+model PointLog {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id") @db.Uuid
+  actionId    String?  @map("action_id")
+  /// マスタが後から変更されても履歴が変わらないよう名称をスナップショット
+  actionName  String   @map("action_name")
+  /// 正: 獲得 / 負: 交換などによる消費
+  points      Int
+  note        String?
+  /// チェックしたスタッフ(自己申告の場合は null)
+  grantedById String?  @map("granted_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user      User         @relation("UserPointLogs", fields: [userId], references: [id], onDelete: Cascade)
+  action    PointAction? @relation(fields: [actionId], references: [id], onDelete: SetNull)
+  grantedBy User?        @relation("GrantedByStaff", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("point_logs")
+}
+
+// ------------------------------------------------------------
+// 実績マスタ(Steam実績風。管理者が編集可能)
+// ------------------------------------------------------------
+model Achievement {
+  id          String   @id @default(cuid())
+  /// プログラムから参照する一意コード(例: FIRST_LOGIN)
+  code        String   @unique
+  name        String
+  description String
+  icon        String   @default("trophy")
+  /// 解除時のボーナスLP
+  bonusLp     Int      @default(0) @map("bonus_lp")
+  /// 解除するまで内容を隠す(Steamの隠し実績風)
+  isSecret    Boolean  @default(false) @map("is_secret")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+// ------------------------------------------------------------
+// ユーザーの実績解除記録
+// ------------------------------------------------------------
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id") @db.Uuid
+  achievementId String   @map("achievement_id")
+  unlockedAt    DateTime @default(now()) @map("unlocked_at")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+// ------------------------------------------------------------
+// ミッションテンプレート(管理者が編集可能)
+// デイリー: 毎日自動生成 / ウィークリー: 毎週月曜に生成
+// ------------------------------------------------------------
+model MissionTemplate {
+  id          String      @id @default(cuid())
+  title       String
+  description String?
+  type        MissionType
+  /// 達成に必要な回数(例: 週5日外出 → 5)
+  targetCount Int         @default(1) @map("target_count")
+  /// 達成時の報酬LP
+  rewardLp    Int         @default(10) @map("reward_lp")
+  /// この行動のポイント付与で進捗が自動で進む(任意)
+  actionId    String?     @map("action_id")
+  isActive    Boolean     @default(true) @map("is_active")
+  sortOrder   Int         @default(0) @map("sort_order")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  action       PointAction?  @relation(fields: [actionId], references: [id], onDelete: SetNull)
+  userMissions UserMission[]
+
+  @@map("mission_templates")
+}
+
+// ------------------------------------------------------------
+// ユーザーごとのミッション進捗(日次・週次で生成)
+// ------------------------------------------------------------
+model UserMission {
+  id          String      @id @default(cuid())
+  userId      String      @map("user_id") @db.Uuid
+  templateId  String      @map("template_id")
+  type        MissionType
+  /// 対象期間の開始日(デイリー: その日 / ウィークリー: 週の月曜)
+  periodStart DateTime    @map("period_start") @db.Date
+  progress    Int         @default(0)
+  targetCount Int         @map("target_count")
+  completed   Boolean     @default(false)
+  completedAt DateTime?   @map("completed_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template MissionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, templateId, periodStart])
+  @@index([userId, periodStart])
+  @@map("user_missions")
+}
+
+// ------------------------------------------------------------
+// 交換商品マスタ(ゲームショップ風。管理者が自由に追加・変更・削除)
+// ------------------------------------------------------------
+model RewardItem {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  costLp      Int      @map("cost_lp")
+  imageUrl    String?  @map("image_url")
+  icon        String   @default("gift")
+  /// null = 在庫無制限
+  stock       Int?
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  exchanges RewardExchange[]
+
+  @@map("reward_items")
+}
+
+// ------------------------------------------------------------
+// ポイント交換履歴
+// ------------------------------------------------------------
+model RewardExchange {
+  id        String         @id @default(cuid())
+  userId    String         @map("user_id") @db.Uuid
+  itemId    String?        @map("item_id")
+  /// 商品マスタ変更に備えたスナップショット
+  itemName  String         @map("item_name")
+  costLp    Int            @map("cost_lp")
+  status    ExchangeStatus @default(PENDING)
+  note      String?
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  item RewardItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("reward_exchanges")
+}
+
+// ------------------------------------------------------------
+// 通知
+// ------------------------------------------------------------
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String
+  body      String?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+// ------------------------------------------------------------
+// 支援記録(スタッフが記入する公式な記録)
+// ------------------------------------------------------------
+model SupportRecord {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id") @db.Uuid
+  staffId    String?  @map("staff_id") @db.Uuid
+  content    String
+  recordedAt DateTime @default(now()) @map("recorded_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user  User  @relation("RecordTarget", fields: [userId], references: [id], onDelete: Cascade)
+  staff User? @relation("RecordAuthor", fields: [staffId], references: [id], onDelete: SetNull)
+
+  @@index([userId, recordedAt])
+  @@map("support_records")
+}
+
+// ------------------------------------------------------------
+// スタッフコメント(利用者へのひとことメモ・応援)
+// ------------------------------------------------------------
+model StaffComment {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id") @db.Uuid
+  staffId   String?  @map("staff_id") @db.Uuid
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User  @relation("CommentTarget", fields: [userId], references: [id], onDelete: Cascade)
+  staff User? @relation("CommentAuthor", fields: [staffId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("staff_comments")
+}
+
+// ------------------------------------------------------------
+// お知らせ(管理者が発信)
+// ------------------------------------------------------------
+model Announcement {
+  id          String   @id @default(cuid())
+  title       String
+  body        String
+  isPublished Boolean  @default(true) @map("is_published")
+  publishedAt DateTime @default(now()) @map("published_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("announcements")
+}
+
+// ------------------------------------------------------------
+// イベント(ゲーム大会・交流イベントなど)
+// ------------------------------------------------------------
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  location    String?
+  startsAt    DateTime @map("starts_at")
+  endsAt      DateTime? @map("ends_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("events")
+}
+
+// ------------------------------------------------------------
+// アプリ全体設定(key-value)
+// 例: ranking_enabled = "true"
+// ------------------------------------------------------------
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
